@@ -7,7 +7,6 @@ import org.apache.logging.log4j.Logger;
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.UnsupportedAudioFileException;
 import java.io.*;
 
 
@@ -55,7 +54,6 @@ public class AudioProcessor {
             }
 
             // ここでWAVデータを使って音声認識や合成を行う
-            // 現在は仮の応答として114514.wavを返す
             return generateResponseAudio(userId);
 
         } catch (final IOException e) {
@@ -66,11 +64,9 @@ public class AudioProcessor {
 
     private byte[] generateResponseAudio(String userId) {
         // TODO: 実際の音声合成処理をここに実装
-        // 現在は仮のデータとして114514.wavを返す
         logger.info("Generating response audio for user: {}", userId);
 
         try {
-            // 仮のデータとして114514.wavファイルを読み込む
             File testAudioFile = new File("audio/114514.wav");
             if (testAudioFile.exists()) {
                 logger.info("Playing test audio file: {}", testAudioFile.getAbsolutePath());
@@ -110,44 +106,6 @@ public class AudioProcessor {
         }
     }
 
-
-    private byte[] amplifyWavData(final byte[] wavData) throws IOException {
-        final double factor = 1.0; // 増幅係数を定数として定義
-
-        try (var inputStream = new ByteArrayInputStream(wavData);
-             var audioInputStream = AudioSystem.getAudioInputStream(inputStream)) {
-
-            var format = audioInputStream.getFormat();
-            var bytesPerSample = format.getSampleSizeInBits() / 8;
-            var frameSize = format.getFrameSize();
-
-            var amplifiedData = new ByteArrayOutputStream();
-            var buffer = new byte[frameSize];
-
-            while (audioInputStream.read(buffer) != -1) {
-                for (int i = 0; i < buffer.length; i += bytesPerSample) {
-                    int sample = 0;
-
-                    // サンプル値を取得
-                    for (int b = 0; b < bytesPerSample; b++)
-                        sample |= (buffer[i + b] & 0xFF) << (b * 8);
-
-                    // 音量を増幅
-                    sample = (int) Math.min(Math.max(sample * factor, Short.MIN_VALUE), Short.MAX_VALUE);
-
-                    // 増幅後のサンプル値をバッファに書き込む
-                    for (int b = 0; b < bytesPerSample; b++)
-                        buffer[i + b] = (byte) ((sample >> (b * 8)) & 0xFF);
-                }
-                amplifiedData.write(buffer);
-            }
-
-            return amplifiedData.toByteArray();
-        } catch (UnsupportedAudioFileException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private byte[] amplifyPcmData(final byte[] pcmData, final double factor) {
         if (pcmData == null || pcmData.length == 0) {
             logger.warn("PCM data is null or empty");
@@ -157,33 +115,21 @@ public class AudioProcessor {
         logger.debug("Amplifying PCM data: size={} bytes, factor={}", pcmData.length, factor);
 
         byte[] amplifiedData = new byte[pcmData.length];
-
-        // JDAのAudioSendHandler.INPUT_FORMATは48kHz, 16bit, Stereo
-        // 16bit = 2バイト、Stereo = 2チャンネル、つまり1サンプル = 4バイト
-        int bytesPerSample = 2; // 16bit = 2バイト
+        int bytesPerSample = 2;
 
         for (int i = 0; i < pcmData.length; i += bytesPerSample) {
             if (i + 1 < pcmData.length) {
-                // Little Endian形式で16bitサンプルを読み取り
                 int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
 
-                // signed 16bitとして扱う
-                if (sample > 32767) {
+                if (sample > 32767)
                     sample -= 65536;
-                }
 
-                // 増幅処理
                 sample = (int) (sample * factor);
-
-                // クリッピング処理（-32768 〜 32767の範囲に制限）
                 sample = Math.max(-32768, Math.min(32767, sample));
 
-                // unsigned 16bitに戻す
-                if (sample < 0) {
+                if (sample < 0)
                     sample += 65536;
-                }
 
-                // Little Endian形式で書き戻し
                 amplifiedData[i] = (byte) (sample & 0xFF);
                 amplifiedData[i + 1] = (byte) ((sample >> 8) & 0xFF);
             }
