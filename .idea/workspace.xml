@@ -4,12 +4,30 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="b281b2bd-6ac1-41d2-a704-6b33ff59e832" name="変更" comment="Remove sensitive information from application.properties">
-      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/commands/SlashCommand.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/gradle.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/gradle.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="b281b2bd-6ac1-41d2-a704-6b33ff59e832" name="変更" comment="Add Discord bot functionality with slash commands and configuration">
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/AudioHandler.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/AudioProcessor.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/CustomInputStreamAudioTrack.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/CustomInputStreamSourceManager.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/CustomSeekableInputStream.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/DataCheckScheduler.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/audio/SharedAudioData.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/config/DiscordSymbol.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/resources/log4j2.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_706373590869606431_20250630_000058_178.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_706373590869606431_20250630_000135_175.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000050_179.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000054_173.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000107_671.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000113_676.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000117_166.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000123_179.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000133_168.wav" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/audio/speech_982272369148170280_20250630_000137_173.wav" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/build.gradle.kts" beforeDir="false" afterPath="$PROJECT_DIR$/build.gradle.kts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/mumeinosato/DiscordBotApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/DiscordBotApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/mumeinosato/commands/SlashCommand.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/mumeinosato/commands/SlashCommand.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/resources/application.properties" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/resources/application.properties" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -51,6 +69,11 @@
                 <item name="AI_character" type="f1a62948:ProjectNode" />
                 <item name="Tasks" type="e4a08cd1:TasksNode" />
                 <item name="build" type="c8890929:TasksNode$1" />
+              </path>
+              <path>
+                <item name="" type="6a2764b6:ExternalProjectsStructure$RootNode" />
+                <item name="AI_character" type="f1a62948:ProjectNode" />
+                <item name="Dependencies" type="6de06a37:ExternalSystemViewDefaultContributor$MyDependenciesNode" />
               </path>
             </expand>
             <select />
@@ -94,6 +117,7 @@
     &quot;Gradle.AI_character [:DiscordBotApplication.main()].executor&quot;: &quot;Run&quot;,
     &quot;Gradle.AI_character [bootRun].executor&quot;: &quot;Run&quot;,
     &quot;Gradle.AI_character [build].executor&quot;: &quot;Run&quot;,
+    &quot;Gradle.ソースのダウンロード.executor&quot;: &quot;Run&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -194,7 +218,15 @@
       <option name="project" value="LOCAL" />
       <updated>1751192876164</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="Add Discord bot functionality with slash commands and configuration">
+      <option name="closed" value="true" />
+      <created>1751209520526</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1751209520526</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -211,7 +243,8 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Initialize project with Gradle setup and basic configuration files" />
     <MESSAGE value="Remove sensitive information from application.properties" />
-    <option name="LAST_COMMIT_MESSAGE" value="Remove sensitive information from application.properties" />
+    <MESSAGE value="Add Discord bot functionality with slash commands and configuration" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add Discord bot functionality with slash commands and configuration" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
