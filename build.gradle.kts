@@ -9,9 +9,7 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
-    maven {
-        url = uri("https://m2.dv8tion.net/releases")
-    }
+    maven { url = uri("https://m2.dv8tion.net/releases") }
 }
 
 dependencies {
@@ -32,6 +30,8 @@ dependencies {
     testAnnotationProcessor("org.projectlombok:lombok:1.18.38")
 
     implementation("com.sedmelluq:lavaplayer:1.3.77")
+
+    implementation(group = "com.google.genai", name = "google-genai", version = "1.7.0")
 }
 
 tasks.test {

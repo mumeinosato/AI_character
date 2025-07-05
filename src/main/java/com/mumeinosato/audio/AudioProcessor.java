@@ -1,19 +1,28 @@
 package com.mumeinosato.audio;
 
+import com.mumeinosato.gemini.SessionManager;
 import net.dv8tion.jda.api.audio.AudioSendHandler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
 
-
+@Component
 public class AudioProcessor {
     private static final Logger logger = LogManager.getLogger(AudioProcessor.class);
 
-    public byte[] processAudio(final String userId, final byte[] audioData) {
+    @Autowired
+    private SessionManager sessionManager;
+
+    public byte[] processAudio(final String guildId, String userId, final byte[] audioData) {
         logger.info("Processing complete speech from user: {} (data size: {} bytes)", userId, audioData.length);
 
         try {
@@ -27,31 +36,16 @@ public class AudioProcessor {
 
             // PCMデータを増幅
             final var amplifiedPcmData = amplifyPcmData(audioData, 1.0); // n倍に増幅
+            final var convertedPcmData = convertAudioFormat(convertPcmToWav(amplifiedPcmData));
 
-            // 増幅されたPCMファイルの保存
-            final var pcmFile = new File(audioDir, userId + "_" + System.currentTimeMillis() + ".pcm");
-            try (var fos = new FileOutputStream(pcmFile)) {
-                fos.write(amplifiedPcmData);
-                logger.debug("Saved amplified PCM file: {}", pcmFile.getName());
-            } catch (IOException e) {
-                logger.error("Failed to write PCM data for user {}: {}", userId, e.getMessage(), e);
+            /*
+            boolean sent = sessionManager.sendAudioData(guildId, convertedPcmData);
+            if (sent) {
+                logger.info("Audio data sent to Gemini for guild: {}", guildId);
+            } else {
+                logger.warn("Failed to send audio data to Gemini for guild: {}", guildId);
             }
-
-            // 増幅されたPCMをWAVに変換
-            final var wavData = this.convertPcmToWav(amplifiedPcmData);
-            if (wavData == null || wavData.length == 0) {
-                logger.error("Failed to convert PCM to WAV for user: {}", userId);
-                return generateResponseAudio(userId);
-            }
-
-            // WAVファイルの保存
-            final var wavFile = new File(audioDir, userId + "_" + System.currentTimeMillis() + ".wav");
-            try (var fos = new FileOutputStream(wavFile)) {
-                fos.write(wavData);
-                logger.info("Saved WAV file: {} (size: {} bytes)", wavFile.getName(), wavData.length);
-            } catch (IOException e) {
-                logger.error("Failed to write WAV data for user {}: {}", userId, e.getMessage(), e);
-            }
+            */
 
             // ここでWAVデータを使って音声認識や合成を行う
             return generateResponseAudio(userId);
@@ -59,6 +53,47 @@ public class AudioProcessor {
         } catch (final IOException e) {
             logger.error("Error processing audio for user {}: {}", userId, e.getMessage(), e);
             return generateResponseAudio(userId); // エラー時も応答を返す
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private byte[] convertAudioFormat(byte[] discordWavData) throws IOException, InterruptedException {
+        Path inputFile = Files.createTempFile("discord", ".wav");
+        Path outputFile = Files.createTempFile("gemini", ".pcm");
+
+        try {
+            Files.write(inputFile, discordWavData);
+
+            ProcessBuilder pb = new ProcessBuilder(
+                    "ffmpeg", "-y",
+                    "-i", inputFile.toString(),
+                    "-f", "s16le",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    outputFile.toString()
+            );
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+
+            StringBuilder ffmpegOutput = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    ffmpegOutput.append(line).append("\n");
+                }
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                logger.error("FFmpeg process failed with exit code {}: {}", exitCode, ffmpegOutput);
+                return null;
+            }
+
+            return Files.readAllBytes(outputFile);
+        } finally {
+            Files.deleteIfExists(inputFile);
+            Files.deleteIfExists(outputFile);
         }
     }
 
@@ -138,4 +173,5 @@ public class AudioProcessor {
         logger.debug("PCM amplification completed");
         return amplifiedData;
     }
+
 }

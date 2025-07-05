@@ -1,6 +1,7 @@
 package com.mumeinosato.commands;
 
 import com.mumeinosato.audio.*;
+import com.mumeinosato.gemini.SessionManager;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
@@ -29,6 +30,12 @@ public class SlashCommand extends ListenerAdapter {
     @Autowired
     private JDA jda;
 
+    @Autowired
+    private SessionManager sessionManager;
+
+    @Autowired
+    private AudioProcessor audioProcessor;
+
     @Value("${discord.guild-id:}")
     private String guildId;
 
@@ -37,7 +44,7 @@ public class SlashCommand extends ListenerAdapter {
 
 
     @PostConstruct
-    public void initializeCommands(){
+    public void initializeCommands() {
         try {
             logger.info("Initializing slash commands...");
             // JDAにイベントリスナーを登録
@@ -67,8 +74,8 @@ public class SlashCommand extends ListenerAdapter {
             guild.updateCommands().addCommands(
                     getCommonCommands()
             ).queue(
-                success -> logger.info("Guild command registration completed: {}", guild.getName()),
-                error -> logger.error("An error occurred while registering the guild command: {}", error.getMessage())
+                    success -> logger.info("Guild command registration completed: {}", guild.getName()),
+                    error -> logger.error("An error occurred while registering the guild command: {}", error.getMessage())
             );
         } else {
             logger.error("The specified guild ID was not found: {}", guildId);
@@ -80,8 +87,8 @@ public class SlashCommand extends ListenerAdapter {
         jda.updateCommands().addCommands(
                 getCommonCommands()
         ).queue(
-            success -> logger.info("Global command registration has been completed (up to 1 hour for changes to take effect)"),
-            error -> logger.error("An error occurred while registering the global command: {}", error.getMessage())
+                success -> logger.info("Global command registration has been completed (up to 1 hour for changes to take effect)"),
+                error -> logger.error("An error occurred while registering the global command: {}", error.getMessage())
         );
     }
 
@@ -93,15 +100,15 @@ public class SlashCommand extends ListenerAdapter {
     }
 
     @Override
-    public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event){
+    public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         try {
             logger.debug("Received slash command: {} from user: {}", event.getName(), event.getUser().getAsTag());
 
-            if(event.getName().equals("join") || event.getName().equals("leave") || event.getName().equals("save")) {
+            if (event.getName().equals("join") || event.getName().equals("leave") || event.getName().equals("save")) {
                 Guild guild = event.getGuild();
                 Member member = event.getMember();
 
-                if(guild == null || member == null){
+                if (guild == null || member == null) {
                     logger.warn("Command {} attempted outside of guild context", event.getName());
                     event.reply("このコマンドはサーバー内でのみ使用できます").setEphemeral(true).queue();
                     return;
@@ -117,23 +124,36 @@ public class SlashCommand extends ListenerAdapter {
                     return;
                 }
 
-                if(event.getName().equals("join")) {
+                if (event.getName().equals("join")) {
+                    /*
+                    boolean geminiCreated = sessionManager.createSession(guild.getId());
+                    if (!geminiCreated) {
+                        logger.error("Failed to create Gemini session for guild: {}", guild.getId());
+                        return;
+                    }
+                    logger.info("Gemini session created successfully for guild: {}", guild.getId());
+                     */
+
+
                     final var audioManager = guild.getAudioManager();
-                    final var audioProcessor = new AudioProcessor();
                     final var sharedAudioData = new SharedAudioData();
                     final var scheduler = new DataCheckScheduler(sharedAudioData);
                     scheduler.start();
                     final AudioPlayerManager playerManager = new DefaultAudioPlayerManager();
                     playerManager.registerSourceManager(new CustomInputStreamSourceManager());
                     AudioSourceManagers.registerLocalSource(playerManager);
-                    final var Handler = new AudioHandler(audioProcessor, sharedAudioData, playerManager);
+
+                    final var Handler = new AudioHandler(audioProcessor, sharedAudioData, playerManager, guild.getId());
+
                     audioManager.setReceivingHandler(Handler);
                     audioManager.setSendingHandler(Handler);
 
                     logger.info("Bot joining voice channel: {} in guild: {}", voiceChannel.getName(), guild.getName());
                     guild.getAudioManager().openAudioConnection(voiceChannel);
                     event.reply("VCに参加しました: " + voiceChannel.getName()).queue();
-                }else if(event.getName().equals("leave")) {
+                } else if (event.getName().equals("leave")) {
+                    sessionManager.removeSession(guild.getId());
+
                     logger.info("Bot leaving voice channel: {} in guild: {}", voiceChannel.getName(), guild.getName());
                     guild.getAudioManager().closeAudioConnection();
                     event.reply("VCから退出しました: " + voiceChannel.getName()).queue();
@@ -149,6 +169,8 @@ public class SlashCommand extends ListenerAdapter {
     public void disconnectFromAllVC() {
         logger.info("Bot shutting down: Disconnecting from all voice channels...");
         try {
+            sessionManager.shutdownAllSessions();
+
             int disconnectedCount = 0;
             for (Guild guild : jda.getGuilds()) {
                 if (guild.getAudioManager().isConnected()) {

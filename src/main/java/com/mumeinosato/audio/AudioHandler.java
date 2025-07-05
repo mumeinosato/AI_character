@@ -23,20 +23,22 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
     private final SharedAudioData sharedAudioData;
     private final AudioPlayerManager playerManager;
     private final AudioPlayer audioPlayer;
+    private final String guildId;
     private AudioFrame lastFrame;
     private boolean isProcessingAudio = false;
 
 
-    public AudioHandler(final AudioProcessor audioProcessor, SharedAudioData sharedAudioData, final AudioPlayerManager playerManager) {
+    public AudioHandler(final AudioProcessor audioProcessor, SharedAudioData sharedAudioData, final AudioPlayerManager playerManager, final String guildId) {
         this.audioProcessor = audioProcessor;
         this.sharedAudioData = sharedAudioData;
         this.playerManager = playerManager;
         this.audioPlayer = playerManager.createPlayer();
+        this.guildId = guildId;
     }
 
     @Override
     public boolean canReceiveCombined() {
-        return false;
+        return AudioReceiveHandler.super.canReceiveCombined();
     }
 
     @Override
@@ -65,12 +67,12 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
                 if (audioData != null) {
                     isProcessingAudio = true;
                     logger.info("Processing complete audio data for user: {} (speech finished)", audioData.getId());
-                    final var replyData = this.audioProcessor.processAudio(audioData.getId(), audioData.getData());
+                    final var replyData = this.audioProcessor.processAudio(guildId, audioData.getId(), audioData.getData());
                     if (replyData != null && replyData.length > 0) {
                         final var base64String = Base64.getEncoder().encodeToString(replyData);
                         this.loadAndPlayTrack(base64String);
                     } else {
-                        logger.debug("Audio processing returned empty data for user: {}", audioData.getId());
+                        logger.info("Audio processing returned empty data for user: {}", audioData.getId());
                         isProcessingAudio = false;
                     }
                 }
@@ -85,7 +87,7 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
         // 音声フレームがない場合は処理完了とみなす
         if (this.lastFrame == null && isProcessingAudio) {
             isProcessingAudio = false;
-            logger.debug("Audio playback finished, ready for next audio");
+            logger.info("Audio playback finished, ready for next audio");
         }
 
         return this.lastFrame != null;
@@ -105,20 +107,17 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
                 logger.info("Track loaded successfully, starting playback");
                 AudioHandler.this.audioPlayer.playTrack(track);
             }
-
-
+            
             @Override
             public void playlistLoaded(final AudioPlaylist playlist) {
                 logger.debug("Playlist loaded (not expected in this context)");
             }
-
 
             @Override
             public void noMatches() {
                 logger.warn("No matches found for track string");
                 isProcessingAudio = false; // 処理失敗時にフラグをリセット
             }
-
 
             @Override
             public void loadFailed(final FriendlyException e) {
@@ -133,7 +132,6 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
 
         return ByteBuffer.wrap(this.lastFrame.getData());
     }
-
 
     @Override
     public boolean isOpus() {
