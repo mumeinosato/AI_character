@@ -20,7 +20,8 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
     private static final Logger logger = LogManager.getLogger(AudioHandler.class);
 
     private final AudioProcessor audioProcessor;
-    private final AsyncAudioProcessor asyncAudioProcessor;
+    private final SyncGeminiAsyncTTSProcessor syncGeminiAsyncTTSProcessor;
+    private final AudioInputQueue audioInputQueue;
     private final AudioPlaybackQueue audioPlaybackQueue;
     private final SharedAudioData sharedAudioData;
     private final AudioPlayerManager playerManager;
@@ -30,11 +31,12 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
     private boolean isPlayingFromQueue = false;
 
 
-    public AudioHandler(final AudioProcessor audioProcessor, final AsyncAudioProcessor asyncAudioProcessor, 
-                        final AudioPlaybackQueue audioPlaybackQueue, SharedAudioData sharedAudioData, 
-                        final AudioPlayerManager playerManager, final String guildId) {
+    public AudioHandler(final AudioProcessor audioProcessor, final SyncGeminiAsyncTTSProcessor syncGeminiAsyncTTSProcessor,
+                        final AudioInputQueue audioInputQueue, final AudioPlaybackQueue audioPlaybackQueue, 
+                        SharedAudioData sharedAudioData, final AudioPlayerManager playerManager, final String guildId) {
         this.audioProcessor = audioProcessor;
-        this.asyncAudioProcessor = asyncAudioProcessor;
+        this.syncGeminiAsyncTTSProcessor = syncGeminiAsyncTTSProcessor;
+        this.audioInputQueue = audioInputQueue;
         this.audioPlaybackQueue = audioPlaybackQueue;
         this.sharedAudioData = sharedAudioData;
         this.playerManager = playerManager;
@@ -63,20 +65,20 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
 
     @Override
     public boolean canProvide() {
-        // Always check for new audio data to process asynchronously
+        // Check for new audio data and add to input queue
         try {
-            // Check for new audio data to process
             this.sharedAudioData.checkAndMoveData();
             
             final var audioData = this.sharedAudioData.takeAudioData();
             if (audioData != null) {
-                logger.info("Starting async processing for user: {} (speech finished)", audioData.getId());
-                // Process audio asynchronously - this does not block!
-                asyncAudioProcessor.processAudioAsync(guildId, audioData.getId(), audioData.getData())
-                    .exceptionally(throwable -> {
-                        logger.error("Async audio processing failed for user {}: {}", audioData.getId(), throwable.getMessage(), throwable);
-                        return null;
-                    });
+                logger.info("Adding audio to input queue for user: {} (speech finished)", audioData.getId());
+                // Add to input queue for processing
+                audioInputQueue.enqueue(guildId, audioData.getId(), audioData.getData());
+            }
+            
+            // Process audio from input queue (sync Gemini + async TTS)
+            if (audioInputQueue.hasNext()) {
+                syncGeminiAsyncTTSProcessor.processNextAudio();
             }
             
             // Handle playback queue - check if we should start playing next item

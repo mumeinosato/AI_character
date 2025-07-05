@@ -7,51 +7,58 @@ import org.mockito.MockitoAnnotations;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Integration test verifying the async audio processing logic
- * This test focuses on the core async behavior without external dependencies
+ * Integration test verifying the sync Gemini + async TTS processing logic
  */
-public class AsyncAudioProcessingTest {
+public class SyncGeminiAsyncTTSTest {
     
     @Mock
     private SessionManager mockSessionManager;
     
+    private AudioInputQueue audioInputQueue;
     private AudioPlaybackQueue audioPlaybackQueue;
     
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        audioInputQueue = new AudioInputQueue();
         audioPlaybackQueue = new AudioPlaybackQueue();
     }
     
     @Test
-    void testAsyncProcessingFlow() throws Exception {
+    void testInputQueueToPlaybackQueue() throws Exception {
         // Setup mock response from SessionManager
         when(mockSessionManager.sendAudioData(anyString(), any(byte[].class)))
             .thenReturn("Test response from Gemini");
         
-        // Create a simplified async processor for testing
-        TestAsyncAudioProcessor processor = new TestAsyncAudioProcessor(mockSessionManager, audioPlaybackQueue);
+        // Create a simplified processor for testing
+        TestSyncGeminiAsyncTTSProcessor processor = new TestSyncGeminiAsyncTTSProcessor(
+            mockSessionManager, audioInputQueue, audioPlaybackQueue);
         
-        // Test data
+        // Add audio data to input queue
         String guildId = "test-guild";
         String userId = "test-user";
         byte[] audioData = "test-audio-data".getBytes();
         
-        // Process audio asynchronously
-        CompletableFuture<Void> processingFuture = processor.processAudioAsync(guildId, userId, audioData);
+        audioInputQueue.enqueue(guildId, userId, audioData);
+        assertEquals(1, audioInputQueue.size());
         
-        // Wait for processing to complete
-        processingFuture.get(5, TimeUnit.SECONDS);
+        // Process next audio
+        processor.processNextAudio();
         
-        // Verify SessionManager was called
+        // Verify input queue is now empty
+        assertEquals(0, audioInputQueue.size());
+        
+        // Verify SessionManager was called synchronously
         verify(mockSessionManager, times(1)).sendAudioData(eq(guildId), any(byte[].class));
         
-        // Verify audio was queued (simplified - we know TTS would normally be called)
-        assertTrue(audioPlaybackQueue.hasNext(), "Audio should be queued after processing");
+        // Wait a bit for async TTS processing to complete
+        Thread.sleep(100);
+        
+        // Verify audio was queued for playback
+        assertTrue(audioPlaybackQueue.hasNext(), "Audio should be queued after TTS processing");
         assertEquals(1, audioPlaybackQueue.size());
         
         // Verify we can dequeue the processed audio
@@ -60,61 +67,100 @@ public class AsyncAudioProcessingTest {
     }
     
     @Test
-    void testMultipleAsyncProcessing() throws Exception {
-        // Test that multiple audio processing requests can be handled concurrently
+    void testMultipleAudioProcessing() throws Exception {
+        // Test that multiple audio inputs are processed in order
         when(mockSessionManager.sendAudioData(anyString(), any(byte[].class)))
             .thenReturn("Response 1", "Response 2", "Response 3");
         
-        TestAsyncAudioProcessor processor = new TestAsyncAudioProcessor(mockSessionManager, audioPlaybackQueue);
+        TestSyncGeminiAsyncTTSProcessor processor = new TestSyncGeminiAsyncTTSProcessor(
+            mockSessionManager, audioInputQueue, audioPlaybackQueue);
         
-        // Submit multiple processing requests
-        CompletableFuture<Void> future1 = processor.processAudioAsync("guild1", "user1", "audio1".getBytes());
-        CompletableFuture<Void> future2 = processor.processAudioAsync("guild2", "user2", "audio2".getBytes());
-        CompletableFuture<Void> future3 = processor.processAudioAsync("guild3", "user3", "audio3".getBytes());
+        // Add multiple audio inputs
+        audioInputQueue.enqueue("guild1", "user1", "audio1".getBytes());
+        audioInputQueue.enqueue("guild2", "user2", "audio2".getBytes());
+        audioInputQueue.enqueue("guild3", "user3", "audio3".getBytes());
         
-        // Wait for all to complete
-        CompletableFuture.allOf(future1, future2, future3).get(5, TimeUnit.SECONDS);
+        assertEquals(3, audioInputQueue.size());
         
-        // Verify all requests were processed
+        // Process all audio inputs
+        processor.processNextAudio();
+        processor.processNextAudio();
+        processor.processNextAudio();
+        
+        // Verify input queue is empty
+        assertEquals(0, audioInputQueue.size());
+        
+        // Verify all requests were processed synchronously
         verify(mockSessionManager, times(3)).sendAudioData(anyString(), any(byte[].class));
+        
+        // Wait for async TTS processing to complete
+        Thread.sleep(200);
         
         // Verify all audio was queued
         assertEquals(3, audioPlaybackQueue.size());
     }
     
+    @Test
+    void testEmptyInputQueueHandling() {
+        TestSyncGeminiAsyncTTSProcessor processor = new TestSyncGeminiAsyncTTSProcessor(
+            mockSessionManager, audioInputQueue, audioPlaybackQueue);
+        
+        // Process when queue is empty
+        processor.processNextAudio();
+        
+        // Verify nothing was called
+        verify(mockSessionManager, times(0)).sendAudioData(anyString(), any(byte[].class));
+        assertEquals(0, audioPlaybackQueue.size());
+    }
+    
     /**
-     * Simplified test version of AsyncAudioProcessor that skips TTS calls
+     * Simplified test version of SyncGeminiAsyncTTSProcessor that skips actual TTS API calls
      */
-    private static class TestAsyncAudioProcessor {
+    private static class TestSyncGeminiAsyncTTSProcessor {
         private final SessionManager sessionManager;
+        private final AudioInputQueue audioInputQueue;
         private final AudioPlaybackQueue audioPlaybackQueue;
         
-        public TestAsyncAudioProcessor(SessionManager sessionManager, AudioPlaybackQueue audioPlaybackQueue) {
+        public TestSyncGeminiAsyncTTSProcessor(SessionManager sessionManager, 
+                                               AudioInputQueue audioInputQueue,
+                                               AudioPlaybackQueue audioPlaybackQueue) {
             this.sessionManager = sessionManager;
+            this.audioInputQueue = audioInputQueue;
             this.audioPlaybackQueue = audioPlaybackQueue;
         }
         
-        public CompletableFuture<Void> processAudioAsync(String guildId, String userId, byte[] audioData) {
-            return CompletableFuture.runAsync(() -> {
-                try {
-                    // Simulate processing delay
-                    Thread.sleep(10);
-                    
-                    // Call Gemini (mocked)
-                    String response = sessionManager.sendAudioData(guildId, audioData);
-                    
-                    if (response != null) {
-                        // Simulate TTS response - normally this would call the actual TTS API
-                        String mockTtsResponse = "mock-tts-audio-data-for-" + response;
-                        
-                        // Queue for playback
-                        audioPlaybackQueue.enqueue(mockTtsResponse);
-                    }
-                    
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+        public void processNextAudio() {
+            AudioInputQueue.AudioData audioData = audioInputQueue.dequeue();
+            if (audioData == null) {
+                return; // No audio to process
+            }
+            
+            try {
+                // Sync call to Gemini
+                String response = sessionManager.sendAudioData(audioData.getGuildId(), audioData.getData());
+                
+                if (response != null) {
+                    // Async TTS processing (simplified for test)
+                    new Thread(() -> {
+                        try {
+                            // Simulate TTS processing delay
+                            Thread.sleep(50);
+                            
+                            // Mock TTS response
+                            String mockTtsResponse = "mock-tts-audio-data-for-" + response;
+                            
+                            // Queue for playback
+                            audioPlaybackQueue.enqueue(mockTtsResponse);
+                            
+                        } catch (Exception e) {
+                            // Handle error
+                        }
+                    }).start();
                 }
-            });
+                
+            } catch (Exception e) {
+                // Handle error
+            }
         }
     }
     

@@ -37,7 +37,10 @@ public class SlashCommand extends ListenerAdapter {
     private AudioProcessor audioProcessor;
     
     @Autowired
-    private AsyncAudioProcessor asyncAudioProcessor;
+    private SyncGeminiAsyncTTSProcessor syncGeminiAsyncTTSProcessor;
+    
+    @Autowired
+    private AudioInputQueue audioInputQueue;
     
     @Autowired
     private AudioPlaybackQueue audioPlaybackQueue;
@@ -149,7 +152,7 @@ public class SlashCommand extends ListenerAdapter {
                     playerManager.registerSourceManager(new CustomInputStreamSourceManager());
                     AudioSourceManagers.registerLocalSource(playerManager);
 
-                    final var Handler = new AudioHandler(audioProcessor, asyncAudioProcessor, audioPlaybackQueue, sharedAudioData, playerManager, guild.getId());
+                    final var Handler = new AudioHandler(audioProcessor, syncGeminiAsyncTTSProcessor, audioInputQueue, audioPlaybackQueue, sharedAudioData, playerManager, guild.getId());
 
                     audioManager.setReceivingHandler(Handler);
                     audioManager.setSendingHandler(Handler);
