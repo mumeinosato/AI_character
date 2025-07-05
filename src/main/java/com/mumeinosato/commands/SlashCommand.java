@@ -35,6 +35,12 @@ public class SlashCommand extends ListenerAdapter {
 
     @Autowired
     private AudioProcessor audioProcessor;
+    
+    @Autowired
+    private AsyncAudioProcessor asyncAudioProcessor;
+    
+    @Autowired
+    private AudioPlaybackQueue audioPlaybackQueue;
 
     @Value("${discord.guild-id:}")
     private String guildId;
@@ -143,7 +149,7 @@ public class SlashCommand extends ListenerAdapter {
                     playerManager.registerSourceManager(new CustomInputStreamSourceManager());
                     AudioSourceManagers.registerLocalSource(playerManager);
 
-                    final var Handler = new AudioHandler(audioProcessor, sharedAudioData, playerManager, guild.getId());
+                    final var Handler = new AudioHandler(audioProcessor, asyncAudioProcessor, audioPlaybackQueue, sharedAudioData, playerManager, guild.getId());
 
                     audioManager.setReceivingHandler(Handler);
                     audioManager.setSendingHandler(Handler);

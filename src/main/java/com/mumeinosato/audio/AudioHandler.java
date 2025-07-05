@@ -20,16 +20,22 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
     private static final Logger logger = LogManager.getLogger(AudioHandler.class);
 
     private final AudioProcessor audioProcessor;
+    private final AsyncAudioProcessor asyncAudioProcessor;
+    private final AudioPlaybackQueue audioPlaybackQueue;
     private final SharedAudioData sharedAudioData;
     private final AudioPlayerManager playerManager;
     private final AudioPlayer audioPlayer;
     private final String guildId;
     private AudioFrame lastFrame;
-    private boolean isProcessingAudio = false;
+    private boolean isPlayingFromQueue = false;
 
 
-    public AudioHandler(final AudioProcessor audioProcessor, SharedAudioData sharedAudioData, final AudioPlayerManager playerManager, final String guildId) {
+    public AudioHandler(final AudioProcessor audioProcessor, final AsyncAudioProcessor asyncAudioProcessor, 
+                        final AudioPlaybackQueue audioPlaybackQueue, SharedAudioData sharedAudioData, 
+                        final AudioPlayerManager playerManager, final String guildId) {
         this.audioProcessor = audioProcessor;
+        this.asyncAudioProcessor = asyncAudioProcessor;
+        this.audioPlaybackQueue = audioPlaybackQueue;
         this.sharedAudioData = sharedAudioData;
         this.playerManager = playerManager;
         this.audioPlayer = playerManager.createPlayer();
@@ -57,37 +63,43 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
 
     @Override
     public boolean canProvide() {
-        // 音声処理中でない場合のみ新しい音声データを処理
-        if (!isProcessingAudio) {
-            try {
-                // 定期的にデータの移動をチェック（話し終わり判定）
-                this.sharedAudioData.checkAndMoveData();
-
-                final var audioData = this.sharedAudioData.takeAudioData();
-                if (audioData != null) {
-                    isProcessingAudio = true;
-                    logger.info("Processing complete audio data for user: {} (speech finished)", audioData.getId());
-                    final var replyData = this.audioProcessor.processAudio(guildId, audioData.getId(), audioData.getData());
-                    if (replyData != null && replyData.length > 0) {
-                        final var base64String = Base64.getEncoder().encodeToString(replyData);
-                        this.loadAndPlayTrack(base64String);
-                    } else {
-                        logger.info("Audio processing returned empty data for user: {}", audioData.getId());
-                        isProcessingAudio = false;
-                    }
-                }
-            } catch (final Exception e) {
-                logger.error("Error in canProvide: {}", e.getMessage(), e);
-                isProcessingAudio = false;
+        // Always check for new audio data to process asynchronously
+        try {
+            // Check for new audio data to process
+            this.sharedAudioData.checkAndMoveData();
+            
+            final var audioData = this.sharedAudioData.takeAudioData();
+            if (audioData != null) {
+                logger.info("Starting async processing for user: {} (speech finished)", audioData.getId());
+                // Process audio asynchronously - this does not block!
+                asyncAudioProcessor.processAudioAsync(guildId, audioData.getId(), audioData.getData())
+                    .exceptionally(throwable -> {
+                        logger.error("Async audio processing failed for user {}: {}", audioData.getId(), throwable.getMessage(), throwable);
+                        return null;
+                    });
             }
+            
+            // Handle playback queue - check if we should start playing next item
+            if (!isPlayingFromQueue && audioPlaybackQueue.hasNext()) {
+                String nextAudioData = audioPlaybackQueue.dequeue();
+                if (nextAudioData != null) {
+                    logger.info("Starting playback from queue. Remaining queue size: {}", audioPlaybackQueue.size());
+                    this.loadAndPlayTrack(nextAudioData);
+                    isPlayingFromQueue = true;
+                }
+            }
+            
+        } catch (final Exception e) {
+            logger.error("Error in canProvide: {}", e.getMessage(), e);
         }
 
+        // Get next audio frame for playback
         this.lastFrame = this.audioPlayer.provide();
 
-        // 音声フレームがない場合は処理完了とみなす
-        if (this.lastFrame == null && isProcessingAudio) {
-            isProcessingAudio = false;
-            logger.info("Audio playback finished, ready for next audio");
+        // Check if current track finished playing
+        if (this.lastFrame == null && isPlayingFromQueue) {
+            isPlayingFromQueue = false;
+            logger.info("Current track finished, ready for next from queue");
         }
 
         return this.lastFrame != null;
@@ -116,13 +128,13 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
             @Override
             public void noMatches() {
                 logger.warn("No matches found for track string");
-                isProcessingAudio = false; // 処理失敗時にフラグをリセット
+                isPlayingFromQueue = false; // Reset flag on failure
             }
 
             @Override
             public void loadFailed(final FriendlyException e) {
                 logger.error("Failed to load track: {}", e.getMessage(), e);
-                isProcessingAudio = false; // 処理失敗時にフラグをリセット
+                isPlayingFromQueue = false; // Reset flag on failure
             }
         });
     }
