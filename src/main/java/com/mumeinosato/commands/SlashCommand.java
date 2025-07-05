@@ -125,14 +125,14 @@ public class SlashCommand extends ListenerAdapter {
                 }
 
                 if (event.getName().equals("join")) {
-                    /*
+
                     boolean geminiCreated = sessionManager.createSession(guild.getId());
                     if (!geminiCreated) {
                         logger.error("Failed to create Gemini session for guild: {}", guild.getId());
                         return;
                     }
                     logger.info("Gemini session created successfully for guild: {}", guild.getId());
-                     */
+
 
 
                     final var audioManager = guild.getAudioManager();
