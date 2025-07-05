@@ -41,6 +41,15 @@ bin/
 ### Mac OS ###
 .DS_Store
 logs/
-audio/
+/audio/
 
 .idea/
+
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
