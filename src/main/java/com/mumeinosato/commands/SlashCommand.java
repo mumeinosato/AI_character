@@ -36,6 +36,9 @@ public class SlashCommand extends ListenerAdapter {
     @Autowired
     private AudioProcessor audioProcessor;
 
+    @Autowired
+    private AudioQueueManager audioQueueManager;
+
     @Value("${discord.guild-id:}")
     private String guildId;
 
@@ -47,30 +50,23 @@ public class SlashCommand extends ListenerAdapter {
     public void initializeCommands() {
         try {
             logger.info("Initializing slash commands...");
-            // JDAにイベントリスナーを登録
             jda.addEventListener(this);
 
-            if (developmentMode) {
-                // 開発環境：ギルドにスラッシュコマンドを登録（即座に反映される）
+            if (developmentMode)
                 registerGuildCommands();
-            } else {
-                // 本番環境：グローバルにスラッシュコマンドを登録（最大1時間で反映）
+            else
                 registerGlobalCommands();
-            }
+
         } catch (Exception e) {
             logger.error("An error occurred while registering the command: {}", e.getMessage(), e);
         }
     }
 
     private void registerGuildCommands() {
-        if (guildId == null || guildId.isEmpty()) {
-            logger.error("This is a development environment, but discord.guild-id is not set");
-            return;
-        }
+        if (guildId == null || guildId.isEmpty()) return;
 
         Guild guild = jda.getGuildById(guildId);
         if (guild != null) {
-            logger.info("Development: Registering guild commands... ({})", guild.getName());
             guild.updateCommands().addCommands(
                     getCommonCommands()
             ).queue(
@@ -83,7 +79,6 @@ public class SlashCommand extends ListenerAdapter {
     }
 
     private void registerGlobalCommands() {
-        logger.info("Production: Registering global command...");
         jda.updateCommands().addCommands(
                 getCommonCommands()
         ).queue(
@@ -115,25 +110,30 @@ public class SlashCommand extends ListenerAdapter {
                 }
 
                 VoiceChannel voiceChannel = null;
-                if (member.getVoiceState() != null && member.getVoiceState().getChannel() != null) {
+                if (member.getVoiceState() != null && member.getVoiceState().getChannel() != null)
                     voiceChannel = member.getVoiceState().getChannel().asVoiceChannel();
-                }
+
                 if (voiceChannel == null) {
-                    logger.warn("User {} attempted {} command without being in a voice channel", member.getEffectiveName(), event.getName());
                     event.reply("VCに参加してください").setEphemeral(true).queue();
                     return;
                 }
 
                 if (event.getName().equals("join")) {
+                    boolean alreadyConnected = jda.getGuilds().stream().anyMatch(g -> g.getAudioManager().isConnected());
 
-                    boolean geminiCreated = sessionManager.createSession(guild.getId());
+                    if (alreadyConnected) {
+                        event.reply("このBotはすべてのサーバーのうち1つのVC二しか参加できません").setEphemeral(true).queue();
+                        return;
+                    }
+
+
+
+                    boolean geminiCreated = sessionManager.createSession();
                     if (!geminiCreated) {
                         logger.error("Failed to create Gemini session for guild: {}", guild.getId());
                         return;
                     }
                     logger.info("Gemini session created successfully for guild: {}", guild.getId());
-
-
 
                     final var audioManager = guild.getAudioManager();
                     final var sharedAudioData = new SharedAudioData();
@@ -143,20 +143,20 @@ public class SlashCommand extends ListenerAdapter {
                     playerManager.registerSourceManager(new CustomInputStreamSourceManager());
                     AudioSourceManagers.registerLocalSource(playerManager);
 
-                    final var Handler = new AudioHandler(audioProcessor, sharedAudioData, playerManager, guild.getId());
+                    final var Handler = new AudioHandler(audioProcessor, sharedAudioData, playerManager, guild.getId(), audioQueueManager);
 
                     audioManager.setReceivingHandler(Handler);
                     audioManager.setSendingHandler(Handler);
 
                     logger.info("Bot joining voice channel: {} in guild: {}", voiceChannel.getName(), guild.getName());
                     guild.getAudioManager().openAudioConnection(voiceChannel);
-                    event.reply("VCに参加しました: " + voiceChannel.getName()).queue();
+                    event.reply("VCに参加しました").setEphemeral(true).queue();
                 } else if (event.getName().equals("leave")) {
-                    sessionManager.removeSession(guild.getId());
+                    sessionManager.removeSession();
 
                     logger.info("Bot leaving voice channel: {} in guild: {}", voiceChannel.getName(), guild.getName());
                     guild.getAudioManager().closeAudioConnection();
-                    event.reply("VCから退出しました: " + voiceChannel.getName()).queue();
+                    event.reply("VCから退出しました").setEphemeral(true).queue();
                 }
             }
         } catch (Exception e) {

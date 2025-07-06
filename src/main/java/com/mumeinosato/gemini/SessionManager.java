@@ -3,32 +3,25 @@ package com.mumeinosato.gemini;
 import com.google.genai.AsyncSession;
 import com.google.genai.Client;
 import com.google.genai.types.*;
-import com.mumeinosato.audio.AudioHandler;
-import com.mumeinosato.audio.AudioProcessor;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PreDestroy;
 import java.util.Collection;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class SessionManager {
     private static final Logger logger = LogManager.getLogger(SessionManager.class);
 
-    private static final Map<String, GeminiSession> sessions = new ConcurrentHashMap<>();
-
-    private static final Map<String, StringBuilder> responseBuffers = new ConcurrentHashMap<>();
-
-    private final Map<String, CompletableFuture<String>> responseFutures = new ConcurrentHashMap<>();
+    private GeminiSession session;
+    private StringBuilder responseBuffer = new StringBuilder();
+    private CompletableFuture<String> responseFuture;
 
     @Value("${gemini.key}")
     private String apiKey;
@@ -41,17 +34,15 @@ public class SessionManager {
         @Getter
         private final AsyncSession session;
         @Getter
-        private final String guildId;
-        @Getter
         @Setter
         private volatile boolean active;
 
-        public GeminiSession(AsyncSession session, String guildId) {
+        public GeminiSession(AsyncSession session) {
             this.session = session;
-            this.guildId = guildId;
             this.active = true;
         }
 
+        @PreDestroy
         public void shutdown() {
             try {
                 this.active = false;
@@ -59,22 +50,19 @@ public class SessionManager {
                     session.close();
             } catch (Exception e) {
                 Logger logger = LogManager.getLogger(SessionManager.class);
-                logger.error("Error shutting down session for guild: {}", guildId, e);
+                logger.error("Error shutting down session", e);
             }
         }
     }
 
-    public boolean createSession(String guildId) {
-        if (sessions.containsKey(guildId)) {
-            logger.warn("Session for guild {} already exists", guildId);
+    public boolean createSession() {
+        if (session != null && session.isActive()) {
+            logger.warn("Session already exists and is active");
             return true;
         }
 
         try {
-            Client client = Client.builder()
-                    .apiKey(apiKey)
-                    .build();
-
+            Client client = Client.builder().apiKey(apiKey).build();
             String modelId = "gemini-2.0-flash-live-001";
 
             LiveConnectConfig config = LiveConnectConfig.builder()
@@ -82,126 +70,99 @@ public class SessionManager {
                     .systemInstruction(systemInstruction)
                     .build();
 
-            AsyncSession session = client.async.live.connect(modelId, config).get();
-            logger.info("Successfully created session for guild {}", guildId);
+            AsyncSession asyncSession = client.async.live.connect(modelId, config).get();
+            logger.info("Successfully created session");
 
-            GeminiSession geminiSession = new GeminiSession(session, guildId);
-            sessions.put(guildId, geminiSession);
-            responseBuffers.put(guildId, new StringBuilder());
-            startReceivingResponses(geminiSession);
+            session = new GeminiSession(asyncSession);
+            responseBuffer.setLength(0);
+            startReceivingResponses();
 
             return true;
         } catch (Exception e) {
-            logger.error("Failed to create session for guild {}: {}", guildId, e.getMessage(), e);
+            logger.error("Failed to create session: {}", e.getMessage(), e);
             return false;
         }
     }
 
-    public void removeSession(String guildId) {
-        GeminiSession session = sessions.remove(guildId);
-        responseBuffers.remove(guildId);
-
+    public void removeSession() {
         if (session != null) {
-            logger.info("Session for guild {} removed", guildId);
+            logger.info("Session removed");
             session.shutdown();
+            session = null;
         } else {
-            logger.warn("No session found for guild {}", guildId);
+            logger.warn("No session found");
         }
     }
 
-    public String sendAudioData(String guildId, byte[] audioData) {
-        GeminiSession session = sessions.get(guildId);
-        if (session == null) {
-            logger.warn("No active session found for guild {}", guildId);
+    public CompletableFuture<String> sendAudioData(byte[] audioData) {
+        if (session == null || !session.isActive()) {
+            logger.warn("No active session found");
             return null;
         }
 
         if (audioData == null || audioData.length == 0) {
-            logger.warn("Received null or empty audio data for guild {}", guildId);
+            logger.warn("Received null or empty audio data");
             return null;
         }
 
-        try {
-            CompletableFuture<String> future = new CompletableFuture<>();
-            responseFutures.put(guildId, future);
+        responseFuture = new CompletableFuture<>();
 
-            LiveSendRealtimeInputParameters audioContent = LiveSendRealtimeInputParameters.builder()
-                    .media(Blob.builder()
-                            .mimeType("audio/pcm")
-                            .data(audioData))
-                    .build();
+        LiveSendRealtimeInputParameters audioContent = LiveSendRealtimeInputParameters.builder()
+                .media(Blob.builder().mimeType("audio/pcm").data(audioData))
+                .build();
 
-            session.getSession().sendRealtimeInput(audioContent)
-                    .exceptionally(e -> {
-                        logger.error("Failed to send realtime input for guild {}", guildId, e);
-                        return null;
-                    });
+        session.getSession().sendRealtimeInput(audioContent)
+                .exceptionally(e -> {
+                    logger.error("Failed to send realtime input", e);
+                    return null;
+                });
 
-            return future.get(15, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            logger.error("Error sending audio data for guild {}: {}", guildId, e.getMessage(), e);
-            return null;
-        } finally {
-            responseFutures.remove(guildId);
-        }
+        return responseFuture.orTimeout(30, TimeUnit.SECONDS)
+                .whenComplete((r,e) -> responseFuture = null);
     }
 
-    private void startReceivingResponses(GeminiSession geminiSession) {
-        CompletableFuture<Void> receiveFuture = geminiSession.getSession().receive(message -> handleResponse(geminiSession.getGuildId(), message));
+    private void startReceivingResponses() {
+        CompletableFuture<Void> receiveFuture = session.getSession().receive(this::handleResponse);
 
         receiveFuture.exceptionally(e -> {
-            logger.error("Failed to receive session for guild {}: {}", geminiSession.getGuildId(), e.getMessage(), e);
-            geminiSession.setActive(false);
+            logger.error("Failed to receive session: {}", e.getMessage(), e);
+            session.setActive(false);
             return null;
         });
     }
 
-    private void handleResponse(String guildId, LiveServerMessage message) {
+    private void handleResponse(LiveServerMessage message) {
         message.serverContent().ifPresent(content -> {
             if (content.turnComplete().orElse(false)) {
-                StringBuilder buffer = responseBuffers.get(guildId);
-                if (buffer != null && !buffer.isEmpty()) {
-                    String completeResponse = buffer.toString().trim();
-                    logger.info("Gemini complete response for guild {}: {}", guildId, completeResponse);
+                if (!responseBuffer.isEmpty()) {
+                    String completeResponse = responseBuffer.toString().trim();
+                    logger.info("Gemini complete response: {}", completeResponse);
+                    if (responseFuture != null && !responseFuture.isDone())
+                        responseFuture.complete(completeResponse);
 
-                    CompletableFuture<String> future = responseFutures.get(guildId);
-                    if(future != null && !future.isDone())
-                        future.complete(completeResponse);
-
-                    buffer.setLength(0);
+                    responseBuffer.setLength(0);
                 }
-
-                logger.info("Turn complete for guild: {}", guildId);
-                System.out.println("\n--- Turn complete for guild: " + guildId + " ---");
-            }
-            else {
+                System.out.println("Turn complete");
+            } else {
                 content.modelTurn().stream()
                         .flatMap(modelTurn -> modelTurn.parts().stream())
                         .flatMap(Collection::stream)
-                        .forEach(part -> {
-                            part.text().ifPresent(text -> {
-                                StringBuilder buffer = responseBuffers.computeIfAbsent(guildId, k -> new StringBuilder());
-                                buffer.append(text);
-
-                            });
-                        });
+                        .forEach(part -> part.text().ifPresent(responseBuffer::append));
             }
         });
     }
 
     public void shutdownAllSessions() {
-        logger.info("Shutting down all sessions");
-        sessions.values().forEach(GeminiSession::shutdown);
-        sessions.clear();
-        logger.info("All sessions have been shut down");
+        logger.info("Shutting down session");
+        if (session != null) {
+            session.shutdown();
+            session = null;
+        }
+        responseBuffer.setLength(0);
+        logger.info("Sessions have been shut down");
     }
 
-    public int getActiveSessionCount() {
-        return (int) sessions.values().stream().filter(GeminiSession::isActive).count();
-    }
-
-    public boolean hasActiveSession(String guildId) {
-        GeminiSession session = sessions.get(guildId);
+    public boolean hasActiveSession() {
         return session != null && session.isActive();
     }
 }

@@ -83,14 +83,5 @@ public class SharedAudioData {
             this.id = id;
             this.data = data;
         }
-
-        // Lombokが正常に動作しない場合のために手動でgetterを追加
-        public String getId() {
-            return id;
-        }
-
-        public byte[] getData() {
-            return data;
-        }
     }
 }

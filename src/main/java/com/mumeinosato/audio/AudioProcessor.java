@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PreDestroy;
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
@@ -20,7 +21,6 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
-import java.util.concurrent.CompletableFuture;
 
 @Component
 public class AudioProcessor {
@@ -31,8 +31,10 @@ public class AudioProcessor {
 
     @Autowired
     private SessionManager sessionManager;
+    @Autowired
+    private AudioQueueManager audioQueueManager;
 
-    public byte[] processAudio(final String guildId, String userId, final byte[] audioData) {
+    public void processAudio(final String guildId, String userId, final byte[] audioData) {
         logger.info("Processing complete speech from user: {} (data size: {} bytes)", userId, audioData.length);
 
         try {
@@ -44,26 +46,25 @@ public class AudioProcessor {
                 }
             }
 
-            // PCMデータを増幅
-            final var amplifiedPcmData = amplifyPcmData(audioData, 1.0); // n倍に増幅
-            final var convertedPcmData = convertAudioFormat(convertPcmToWav(amplifiedPcmData));
+            final var convertedPcmData = convertAudioFormat(convertPcmToWav(audioData));
+            audioQueueManager.enqueueGemini(convertedPcmData);
 
-
-            String sent = sessionManager.sendAudioData(guildId, convertedPcmData);
-            if (sent != null) {
-                logger.info("Audio data sent to Gemini for guild: {}", guildId);
-            } else {
-                logger.warn("Failed to send audio data to Gemini for guild: {}", guildId);
-                return null;
-            }
-
+            //String sent = sessionManager.sendAudioData(guildId, convertedPcmData);
+            //if (sent != null) {
+            //    logger.info("Audio data sent to Gemini for guild: {}", guildId);
+            //} else {
+            //    logger.warn("Failed to send audio data to Gemini for guild: {}", guildId);
+            //    return null;
+            //}
 
             // ここでWAVデータを使って音声認識や合成を行う
-            return callTTSApi(sent);
+            //return callTTSApi(sent);
+
+            return;
 
         } catch (final IOException e) {
             logger.error("Error processing audio for user {}: {}", userId, e.getMessage(), e);
-            return null;
+            return;
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -90,9 +91,7 @@ public class AudioProcessor {
             StringBuilder ffmpegOutput = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
-                while ((line = reader.readLine()) != null) {
-                    ffmpegOutput.append(line).append("\n");
-                }
+                while ((line = reader.readLine()) != null) ffmpegOutput.append(line).append("\n");
             }
 
             int exitCode = process.waitFor();
@@ -108,7 +107,7 @@ public class AudioProcessor {
         }
     }
 
-    private byte[] callTTSApi(String text) {
+    public byte[] callTTSApi(String text) {
         try {
             HttpClient httpClient = HttpClient.newHttpClient();
             String base64Text = Base64.getEncoder().encodeToString(text.getBytes("UTF-8"));
@@ -134,49 +133,14 @@ public class AudioProcessor {
 
     private byte[] convertPcmToWav(final byte[] pcmData) throws IOException {
 
-        try (
-                var wavOutputStream = new ByteArrayOutputStream();
-                var audioInputStream = new AudioInputStream(
-                        new ByteArrayInputStream(pcmData),
-                        AudioSendHandler.INPUT_FORMAT,
-                        pcmData.length)) {
+        try (var wavOutputStream = new ByteArrayOutputStream();
+             var audioInputStream = new AudioInputStream(
+                     new ByteArrayInputStream(pcmData),
+                     AudioSendHandler.INPUT_FORMAT,
+                     pcmData.length)) {
 
             AudioSystem.write(audioInputStream, AudioFileFormat.Type.WAVE, wavOutputStream);
             return wavOutputStream.toByteArray();
         }
     }
-
-    private byte[] amplifyPcmData(final byte[] pcmData, final double factor) {
-        if (pcmData == null || pcmData.length == 0) {
-            logger.warn("PCM data is null or empty");
-            return pcmData;
-        }
-
-        logger.debug("Amplifying PCM data: size={} bytes, factor={}", pcmData.length, factor);
-
-        byte[] amplifiedData = new byte[pcmData.length];
-        int bytesPerSample = 2;
-
-        for (int i = 0; i < pcmData.length; i += bytesPerSample) {
-            if (i + 1 < pcmData.length) {
-                int sample = (pcmData[i] & 0xFF) | ((pcmData[i + 1] & 0xFF) << 8);
-
-                if (sample > 32767)
-                    sample -= 65536;
-
-                sample = (int) (sample * factor);
-                sample = Math.max(-32768, Math.min(32767, sample));
-
-                if (sample < 0)
-                    sample += 65536;
-
-                amplifiedData[i] = (byte) (sample & 0xFF);
-                amplifiedData[i + 1] = (byte) ((sample >> 8) & 0xFF);
-            }
-        }
-
-        logger.debug("PCM amplification completed");
-        return amplifiedData;
-    }
-
 }

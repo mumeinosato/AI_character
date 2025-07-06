@@ -12,17 +12,7 @@ public class DiscordBotApplication {
 
     public static void main(String[] args){
         logger.info("Discord Bot Application starting...");
-
-        ConfigurableApplicationContext context = SpringApplication.run(DiscordBotApplication.class, args);
-
+        SpringApplication.run(DiscordBotApplication.class, args);
         logger.info("Discord Bot Application started successfully");
-
-        // シャットダウンフックを追加
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutting down application...");
-            System.out.println("Shutting down application...");
-            context.close();
-            logger.info("Application shutdown complete");
-        }));
     }
 }

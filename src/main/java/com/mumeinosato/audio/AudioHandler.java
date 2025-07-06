@@ -26,14 +26,17 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
     private final String guildId;
     private AudioFrame lastFrame;
     private boolean isProcessingAudio = false;
+    private final AudioQueueManager audioQueueManager;
 
 
-    public AudioHandler(final AudioProcessor audioProcessor, SharedAudioData sharedAudioData, final AudioPlayerManager playerManager, final String guildId) {
+    public AudioHandler(final AudioProcessor audioProcessor, SharedAudioData sharedAudioData, final AudioPlayerManager playerManager, final String guildId, final AudioQueueManager audioQueueManager) {
         this.audioProcessor = audioProcessor;
         this.sharedAudioData = sharedAudioData;
         this.playerManager = playerManager;
         this.audioPlayer = playerManager.createPlayer();
         this.guildId = guildId;
+        this.audioQueueManager = audioQueueManager;
+        startDiscordAudioWorker();
     }
 
     @Override
@@ -52,7 +55,6 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
         this.sharedAudioData.addAudioData(userAudio.getUser().getId(), receiveData);
 
         // handleUserAudioでは音声データの追加のみ行い、移動チェックはcanProvideで行う
-        // this.sharedAudioData.checkAndMoveData(); // この行を削除
     }
 
     @Override
@@ -67,6 +69,8 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
                 if (audioData != null) {
                     isProcessingAudio = true;
                     logger.info("Processing complete audio data for user: {} (speech finished)", audioData.getId());
+                    this.audioProcessor.processAudio(guildId, audioData.getId(), audioData.getData());
+                    /*
                     final var replyData = this.audioProcessor.processAudio(guildId, audioData.getId(), audioData.getData());
                     if (replyData != null && replyData.length > 0) {
                         final var base64String = Base64.getEncoder().encodeToString(replyData);
@@ -75,6 +79,7 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
                         logger.info("Audio processing returned empty data for user: {}", audioData.getId());
                         isProcessingAudio = false;
                     }
+                    */
                 }
             } catch (final Exception e) {
                 logger.error("Error in canProvide: {}", e.getMessage(), e);
@@ -91,6 +96,24 @@ public class AudioHandler implements AudioReceiveHandler, AudioSendHandler {
         }
 
         return this.lastFrame != null;
+    }
+
+    private void startDiscordAudioWorker() {
+        Thread worker = new Thread(() -> {
+            while(true){
+                try {
+                    final var replyData = audioQueueManager.dequeueDiscord();
+                    final var base64String = Base64.getEncoder().encodeToString(replyData);
+                    if (base64String != null && !base64String.isEmpty()){
+                        loadAndPlayTrack(base64String);
+                    }
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        });
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void loadAndPlayTrack(final String trackString) {
