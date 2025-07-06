@@ -27,6 +27,7 @@ public class SessionManager {
     private String apiKey;
 
     private String prompt = "女子高校生,敬語ではなく砕けたかんじで,1~2文ぐらいで短く,会話がつながるようにして,絵文字は使わないで,アルファベットは読み上げられないから、カタカナにして";
+    //private String prompt = "女子高校生,敬語ではなく砕けたかんじで,1文で短く,会話がつながるようにして,絵文字は使わないで,アルファベットは読み上げられないから、カタカナにして";
 
     Content systemInstruction = Content.fromParts(Part.fromText(prompt));
 
